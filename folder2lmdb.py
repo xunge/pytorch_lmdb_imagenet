@@ -3,7 +3,7 @@ import os.path as osp
 from PIL import Image
 import six
 import lmdb
-import pyarrow as pa
+import pickle
 import numpy as np
 
 import torch.utils.data as data
@@ -11,12 +11,12 @@ from torch.utils.data import DataLoader
 from torchvision.datasets import ImageFolder
 
 
-def loads_pyarrow(buf):
+def loads_data(buf):
     """
     Args:
         buf: the output of `dumps`.
     """
-    return pa.deserialize(buf)
+    return pickle.loads(buf)
 
 
 class ImageFolderLMDB(data.Dataset):
@@ -26,8 +26,8 @@ class ImageFolderLMDB(data.Dataset):
                              readonly=True, lock=False,
                              readahead=False, meminit=False)
         with self.env.begin(write=False) as txn:
-            self.length = loads_pyarrow(txn.get(b'__len__'))
-            self.keys = loads_pyarrow(txn.get(b'__keys__'))
+            self.length = loads_data(txn.get(b'__len__'))
+            self.keys = loads_data(txn.get(b'__keys__'))
 
         self.transform = transform
         self.target_transform = target_transform
@@ -37,7 +37,7 @@ class ImageFolderLMDB(data.Dataset):
         with env.begin(write=False) as txn:
             byteflow = txn.get(self.keys[index])
 
-        unpacked = loads_pyarrow(byteflow)
+        unpacked = loads_data(byteflow)
 
         # load img
         imgbuf = unpacked[0]
@@ -73,13 +73,13 @@ def raw_reader(path):
     return bin_data
 
 
-def dumps_pyarrow(obj):
+def dumps_data(obj):
     """
     Serialize an object.
     Returns:
         Implementation-dependent bytes-like object
     """
-    return pa.serialize(obj).to_buffer()
+    return pickle.dumps(obj)
 
 
 def folder2lmdb(dpath, name="train", write_frequency=5000):
@@ -100,7 +100,7 @@ def folder2lmdb(dpath, name="train", write_frequency=5000):
     for idx, data in enumerate(data_loader):
         image, label = data[0]
 
-        txn.put(u'{}'.format(idx).encode('ascii'), dumps_pyarrow((image, label)))
+        txn.put(u'{}'.format(idx).encode('ascii'), dumps_data((image, label)))
         if idx % write_frequency == 0:
             print("[%d/%d]" % (idx, len(data_loader)))
             txn.commit()
@@ -110,8 +110,8 @@ def folder2lmdb(dpath, name="train", write_frequency=5000):
     txn.commit()
     keys = [u'{}'.format(k).encode('ascii') for k in range(idx + 1)]
     with db.begin(write=True) as txn:
-        txn.put(b'__keys__', dumps_pyarrow(keys))
-        txn.put(b'__len__', dumps_pyarrow(len(keys)))
+        txn.put(b'__keys__', dumps_data(keys))
+        txn.put(b'__len__', dumps_data(len(keys)))
 
     print("Flushing database ...")
     db.sync()
